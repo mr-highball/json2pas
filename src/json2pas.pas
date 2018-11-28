@@ -306,10 +306,59 @@ end;
 
 class function TJ2PasObject.Parse(const AJSON: String;
   out JObject: TJ2PasObject;out Error:String): Boolean;
+var
+  I:Integer;
+  LData:TJSONData;
+  LJSON:TJSONObject;
 begin
   Result:=False;
   try
-    //todo - parse string and create object
+    LData:=GetJSON(AJSON);
+
+    //handle bad json
+    if not Assigned(LData) then
+    begin
+      Error:='json is invalid';
+      Exit;
+    end;
+
+    //make sure we have a valid json object
+    if not (LData.JSONType = TJSONtype.jtObject) then
+    begin
+      Error:='json is not a valid object';
+      Exit;
+    end;
+
+    LJSON:=TJSONObject(LData);
+    try
+      JObject:=TJ2PasObject.Create(True);
+
+      //translate properties to j2pas properties
+      for I := 0 to Pred(LJSON.Count) do
+      begin
+        LData:=LJSON.Items[I];
+        case LData.JSONType of
+          //all basic types can be handled the same
+          TJSONtype.jtNumber, TJSONtype.jtString, TJSONtype.jtBoolean:
+            begin
+              //todo - add basic types to result
+            end;
+          //for arrays we need to determine if it's values are basic type
+          //or a complex type (array/object) by looking at the first item
+          TJSONtype.jtArray:
+            begin
+              //todo - determine type (basic/complex) and handle accordingly
+            end;
+          //object types can be handled with recursion
+          TJSONtype.jtObject:
+            begin
+              //todo - check for pre-existence, if not recurse add
+            end;
+        end;
+      end;
+    finally
+      LJSON.Free;
+    end;
   except on E:Exception do
     Error:=E.Message;
   end;
