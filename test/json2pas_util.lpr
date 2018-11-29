@@ -21,6 +21,30 @@ type
     procedure WriteHelp; virtual;
   end;
 
+procedure TestSomeJSON;
+var
+  LObj:TJ2PasObject;
+  LError:String;
+  I:Integer;
+begin
+  if not TJ2PasObject.Parse('{"test_property":["hello world"]}',LObj,LError) then
+  begin
+    WriteLn(LError);
+  end;
+
+  //add the object
+  TJ2PasObject.ObjectExists(LObj.Properties,I,True,'TTestObj');
+
+  //now try to add parse an object which has a object property
+  if not TJ2PasObject.Parse('{"test_object_property":{"test_property":["hello world"]}}',LObj,LError) then
+  begin
+    WriteLn(LError);
+  end;
+
+  //add the compound object
+  TJ2PasObject.ObjectExists(LObj.Properties,I,True,'TTestCompoundObj');
+end;
+
 { TJSON2PasMain }
 
 procedure TJSON2PasUtil.DoRun;
@@ -43,6 +67,7 @@ begin
   end;
 
   { add your program here }
+  TestSomeJSON;
 
   // stop program loop
   Terminate;

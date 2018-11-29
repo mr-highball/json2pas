@@ -13,6 +13,7 @@ type
     enum representing possible json types
   *)
   TJ2PasType = (
+    jtString,
     jtInt,
     jtFloat,
     jtBool,
@@ -116,7 +117,7 @@ type
     //methods
     function Equals(Obj: TObject): boolean; override;
     class function ObjectExists(Const AProperties:TJ2PasProps;Out Index:Integer;
-      Const AAddIfFalse:Boolean=True):Boolean;static;
+      Const AAddIfFalse:Boolean=True;Const AName:String=''):Boolean;static;
     class function Parse(Const AJSON:String;Out JObject:TJ2PasObject;
       out Error:String):Boolean;static;
     constructor Create;virtual;overload;
@@ -137,7 +138,7 @@ var
 
 implementation
 var
-  Objects : TJ2PasObjects;
+  GlobalObjects : TJ2PasObjects;
 
 function ObjectByName(const AObjects: TJ2PasObjects;Const AName:String;
   out AObject: TJ2PasObject): Boolean;
@@ -195,7 +196,6 @@ end;
 
 procedure TJ2PasProp.AssignTo(Dest: TPersistent);
 begin
-  inherited AssignTo(Dest);
   if not (Dest is TJ2PasProp) then
     Exit;
   TJ2PasProp(Dest).Name:=FName;
@@ -213,9 +213,9 @@ end;
 
 { TJ2PasObject }
 
-class function TJ2PasObject.GetObjects: TJ2PasObjects; static;
+class function TJ2PasObject.GetObjects: TJ2PasObjects;
 begin
-  Result:=Objects;
+  Result:=GlobalObjects;
 end;
 
 function TJ2PasObject.Equals(Obj: TObject): boolean;
@@ -257,7 +257,7 @@ begin
 end;
 
 class function TJ2PasObject.ObjectExists(const AProperties: TJ2PasProps; out
-  Index: Integer; const AAddIfFalse: Boolean): Boolean;
+  Index: Integer; const AAddIfFalse: Boolean;Const AName:String): Boolean;
 var
   I:Integer;
   LObj,
@@ -287,6 +287,7 @@ begin
     if AAddIfFalse then
     begin
       LNewObj:=TJ2PasObject.Create(true);
+      LNewObj.Name:=AName;
 
       //copy properties
       for I := 0 to Pred(AProperties.Count) do
@@ -310,6 +311,135 @@ var
   I:Integer;
   LData:TJSONData;
   LJSON:TJSONObject;
+
+  function JTypeToJ2PType(Const AType:TJSONtype;Const AValue:String=''):TJ2PasType;
+  var
+    LInt:Integer;
+  begin
+    case AType of
+      TJSONtype.jtObject: Result:=TJ2PasType.jtObject;
+      TJSONtype.jtString: Result:=TJ2PasType.jtString;
+      TJSONtype.jtBoolean: Result:=TJ2PasType.jtBool;
+      TJSONtype.jtArray: Result:=TJ2PasType.jtArray;
+      TJSONtype.jtNumber:
+        begin
+          if TryStrToInt(AValue,LInt) then
+            Result:=jtFloat
+          else
+            Result:=jtInt;
+        end;
+      else
+        Result:=TJ2PasType.jtString;
+    end;
+  end;
+
+  procedure AddBasicType(Const AData:TJSONData;Const AName:String);
+  var
+    LProp:TJ2PasProp;
+  begin
+    LProp:=TJ2PasProp.Create;
+    LProp.Name:=AName;
+
+    //map j2pas types
+    LProp.JType:=JTypeToJ2PType(AData.JSONType,AData.Value);
+
+    //add the property to the object if it doesn't exist
+    if JObject.Properties.IndexOf(LProp) < 0 then
+      JObject.Properties.Add(LProp)
+    else
+      LProp.Free;
+  end;
+
+  procedure AddArrayType(Const AJSONArray:TJSONArray;Const AName:String);
+  var
+    LProp:TJ2PasProp;
+    LData:TJSONData;
+    LObj:TJ2PasObject;
+    LError:String;
+    I:Integer;
+  begin
+    //if we cannot determine the type of the first value we cannot had the prop
+    if not Assigned(AJSONArray) or (AJSONArray.Count < 1) then
+      Exit;
+
+    //get reference to data
+    LData:=AJSONArray.Items[0];
+
+    //based on type fill out the array properties
+    case LData.JSONType of
+      TJSONtype.jtNumber, TJSONtype.jtString, TJSONtype.jtBoolean:
+        begin
+          LProp:=TJ2PasArrayProp.Create;
+          LProp.JType:=TJ2PasType.jtArray;
+          LProp.Name:=AName;
+          TJ2PasArrayProp(LProp).JType:=JTypeToJ2PType(LData.JSONType,LData.Value);
+        end;
+      TJSONtype.jtArray:
+        begin
+          //we only handle one level deep for arrays, so for arrays of arrays
+          //just mark as string
+          LProp:=TJ2PasArrayProp.Create;
+          LProp.JType:=TJ2PasType.jtArray;
+          LProp.Name:=AName;
+          TJ2PasArrayProp(LProp).ArrayType:=TJ2PasType.jtString;
+        end;
+      TJSONtype.jtObject:
+        begin
+          LProp:=TJ2PasArrayObject.Create;
+          LProp.JType:=TJ2PasType.jtArray;
+          LProp.Name:=AName;
+          TJ2PasArrayObject(LProp).ArrayType:=TJ2PasType.jtObject;
+
+          //attempt to parse this object
+          if not Parse(LData.AsJSON,LObj,LError) then
+          begin
+            LProp.Free;
+            Exit;
+          end;
+
+          //check if the object exists, if so use it's name rather than this one
+          if ObjectExists(LObj.Properties,I,True,AName + 'Item') then
+            TJ2PasArrayObject(LProp).ObjectName:=Objects[I].Name
+          else
+            TJ2PasArrayObject(LProp).ObjectName:=AName + 'Item';
+        end;
+    end;
+
+    //add property
+    JObject.Properties.Add(LProp);
+  end;
+
+  procedure AddObjectType(Const AObject:TJSONObject;Const AName:String);
+  var
+    LProp:TJ2PasProp;
+    LObj:TJ2PasObject;
+    LError:String;
+    I:Integer;
+  begin
+    LProp:=TJ2PasProp.Create;
+    LProp.Name:=AName;
+    LProp.JType:=TJ2PasType.jtObject;
+
+    //first look to see if this object exists by name, if not we need to add it
+    if not ObjectByName(Objects,AName,LObj) then
+    begin
+      //try to parse, if we can't free property
+      if not Parse(AObject.AsJSON,LObj,LError) then
+      begin
+        LProp.Free;
+        Exit;
+      end
+      //otherwise check for existance on properties, and add if exists
+      //use the name that is set their rather than the one provided to us
+      else
+        if ObjectExists(LObj.Properties,I,True,AName) then
+          LProp.Name:=Objects[I].Name;
+    end;
+
+    //add property
+    JObject.Properties.Add(LProp);
+  end;
+
 begin
   Result:=False;
   try
@@ -338,24 +468,25 @@ begin
       begin
         LData:=LJSON.Items[I];
         case LData.JSONType of
-          //all basic types can be handled the same
+          //handle basic types
           TJSONtype.jtNumber, TJSONtype.jtString, TJSONtype.jtBoolean:
             begin
-              //todo - add basic types to result
+              AddBasicType(LData,LJSON.Names[I]);
             end;
           //for arrays we need to determine if it's values are basic type
           //or a complex type (array/object) by looking at the first item
           TJSONtype.jtArray:
             begin
-              //todo - determine type (basic/complex) and handle accordingly
+              AddArrayType(TJSONArray(LData),LJSON.Names[I]);
             end;
           //object types can be handled with recursion
           TJSONtype.jtObject:
             begin
-              //todo - check for pre-existence, if not recurse add
+              AddObjectType(TJSONObject(LData),LJSON.Names[I]);
             end;
         end;
       end;
+      Result:=True;
     finally
       LJSON.Free;
     end;
@@ -381,8 +512,8 @@ begin
 end;
 
 initialization
-  Objects:=TJ2PasObjects.Create(True);
+  GlobalObjects:=TJ2PasObjects.Create(True);
 finalization
-  Objects.Free;
+  GlobalObjects.Free;
 end.
 
