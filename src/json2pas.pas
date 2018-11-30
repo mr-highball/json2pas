@@ -1,3 +1,25 @@
+{ json2pas
+
+  Copyright (c) 2018 mr-highball
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to
+  deal in the Software without restriction, including without limitation the
+  rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+  sell copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+  IN THE SOFTWARE.
+}
 unit json2pas;
 
 {$mode delphi}{$H+}
@@ -37,11 +59,15 @@ type
   protected
     procedure AssignTo(Dest: TPersistent); override;
     function GetMeta: TJ2PasPropClass;virtual;
+    procedure DoToJSON(Const AObject:TJSONObject);virtual;
+    procedure DoFromJSON(Const AObject:TJSONObject);virtual;
   public
     property Name : String read FName write FName;
     property JType : TJ2PasType read FType write FType;
     property MetaClass : TJ2PasPropClass read GetMeta;
     function Equals(Obj: TObject): boolean; override;
+    function ToJSON:String;
+    procedure FromJSON(Const AJSON:String);
   end;
 
 
@@ -54,6 +80,7 @@ type
   protected
     procedure AssignTo(Dest: TPersistent); override;
     function GetMeta: TJ2PasPropClass; override;
+    procedure DoToJSON(const AObject: TJSONObject); override;
   public
     property ArrayType : TJ2PasType read FArrayType write FArrayType;
   end;
@@ -66,6 +93,8 @@ type
   protected
     procedure AssignTo(Dest: TPersistent); override;
     function GetMeta: TJ2PasPropClass; override;
+    procedure DoToJSON(const AObject: TJSONObject); override;
+    procedure DoFromJSON(const AObject: TJSONObject); override;
   public
     property ObjectName : String read FObjectName write FObjectName;
   end;
@@ -83,20 +112,15 @@ type
   *)
   TJ2PasObjects = TFPGObjectList<TJ2PasObject>;
 
-  TNameFormat = procedure(Const AProperty:TJ2PasProp;Var ANewName:String);
-
-  { TJ2PasParseOptions }
   (*
-    options used in object parsing
+    formatting type for property names
   *)
-  TJ2PasParseOptions = packed record
-  strict private
-    FIgnore: Boolean;
-    FNameFormat: TNameFormat;
-  public
-    property IgnoreNulls : Boolean read FIgnore write FIgnore;
-    property NameFormat : TNameFormat read FNameFormat write FNameFormat;
-  end;
+  TPropertyNameFormat = procedure(Var APropertyName:String);
+
+  (*
+    formatting type for object names
+  *)
+  TObjectNameFormat = procedure(Var AObjectName:String);
 
   { TJ2PasObject }
   (*
@@ -108,6 +132,8 @@ type
     FProps: TJ2PasProps;
     class function GetObjects: TJ2PasObjects; static;
   strict protected
+    procedure DoToJSON(Const AObject:TJSONObject);virtual;
+    procedure DoFromJSON(Const AObject:TJSONObject);virtual;
   public
     //properties
     property Name : String read FName write FName;
@@ -116,6 +142,8 @@ type
 
     //methods
     function Equals(Obj: TObject): boolean; override;
+    function ToJSON:String;
+    procedure FromJSON(Const AJSON:String);
     class function ObjectExists(Const AProperties:TJ2PasProps;Out Index:Integer;
       Const AAddIfFalse:Boolean=True;Const AName:String=''):Boolean;static;
     class function Parse(Const AJSON:String;Out JObject:TJ2PasObject;
@@ -134,7 +162,8 @@ var
   (*
     assign a default name format and this will be used when parsing
   *)
-  DefaultNameFormat : TNameFormat;
+  DefaultPropertyNameFormat : TPropertyNameFormat;
+  DefaultObjectNameFormat : TObjectNameFormat;
 
 implementation
 var
@@ -172,6 +201,18 @@ begin
   Result:=TJ2PasArrayObject;
 end;
 
+procedure TJ2PasArrayObject.DoToJSON(const AObject: TJSONObject);
+begin
+  inherited DoToJSON(AObject);
+  AObject.Add('object_name',FObjectName);
+end;
+
+procedure TJ2PasArrayObject.DoFromJSON(const AObject: TJSONObject);
+begin
+  inherited DoFromJSON(AObject);
+  FObjectName:=AObject.Get('object_name','TUnknown');
+end;
+
 { TJ2PasArrayProp }
 
 procedure TJ2PasArrayProp.AssignTo(Dest: TPersistent);
@@ -187,11 +228,30 @@ begin
   Result:=TJ2PasArrayProp;
 end;
 
+procedure TJ2PasArrayProp.DoToJSON(const AObject: TJSONObject);
+begin
+  inherited DoToJSON(AObject);
+  AObject.Add('array_type',Ord(FArrayType));
+end;
+
 { TJ2PasProp }
 
 function TJ2PasProp.GetMeta: TJ2PasPropClass;
 begin
   Result:=TJ2PasProp;
+end;
+
+procedure TJ2PasProp.DoToJSON(Const AObject:TJSONObject);
+begin
+  AObject.Add('name',FName);
+  AObject.Add('type',Ord(FType));
+  AObject.Add('meta',GetMeta.ClassName);
+end;
+
+procedure TJ2PasProp.DoFromJSON(Const AObject:TJSONObject);
+begin
+  FName:=AObject.Get('name','');
+  FType:=TJ2PasType(AObject.Get('type',Ord(TJ2PasType.jtString)));
 end;
 
 procedure TJ2PasProp.AssignTo(Dest: TPersistent);
@@ -211,11 +271,102 @@ begin
     Result:=True;
 end;
 
+function TJ2PasProp.ToJSON: String;
+var
+  LObj:TJSONObject;
+begin
+  LObj:=TJSONObject.Create;
+  try
+    DoToJSON(LObj);
+    Result:=LObj.AsJSON;
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJ2PasProp.FromJSON(const AJSON: String);
+var
+  LData:TJSONData;
+  LObj:TJSONObject;
+begin
+  LData:=GetJSON(AJSON);
+  if LData.JSONType <> TJSONtype.jtObject then
+  begin
+    LData.Free;
+    LObj:=TJSONObject.Create;
+  end
+  else
+    LObj:=TJSONObject(LData);
+
+  try
+    DoFromJSON(LObj);
+  finally
+    LObj.Free;
+  end;
+end;
+
 { TJ2PasObject }
 
 class function TJ2PasObject.GetObjects: TJ2PasObjects;
 begin
   Result:=GlobalObjects;
+end;
+
+procedure TJ2PasObject.DoToJSON(const AObject: TJSONObject);
+var
+  I:Integer;
+  LProps:TJSONArray;
+  LObj:TJSONObject;
+begin
+  AObject.Add('name',FName);
+  LProps:=TJSONArray.Create;
+  try
+    //add all properties to json array for serialization
+    for I:=0 to Pred(Properties.Count) do
+    begin
+      LObj:=TJSONObject(GetJSON(Properties[I].ToJSON));
+      LProps.Add(LObj);
+    end;
+  except
+    LProps.Free;
+    Exit;
+  end;
+
+  //add properties to the result
+  AObject.Add('properties',LProps);
+end;
+
+procedure TJ2PasObject.DoFromJSON(const AObject: TJSONObject);
+var
+  I:Integer;
+  LProps:TJSONArray;
+  LProp:TJ2PasProp;
+begin
+  FName:=AObject.Get('name');
+  LProps:=AObject.Arrays['properties'];
+
+  //if we have props iterate and add
+  if Assigned(LProps) then
+  begin
+    for I:=0 to Pred(LProps.Count) do
+    begin
+      try
+        //we need to match up with class name and instantiate via GetClass
+        LProp:=TJ2PasProp(GetClass(TJSONObject(LProps.Items[I]).Get('meta',TJ2PasProp.ClassName)));
+
+        //now deserialize
+        LProp.FromJSON(LProps.Items[I].AsJSON);
+
+        //lastly add this property to the object
+        Properties.Add(LProp);
+      except on E:Exception do
+      begin
+        LProp.Free;
+        Raise E;
+      end
+      end;
+    end;
+  end;
 end;
 
 function TJ2PasObject.Equals(Obj: TObject): boolean;
@@ -256,8 +407,42 @@ begin
   Result:=True;
 end;
 
+function TJ2PasObject.ToJSON: String;
+var
+  LObj:TJSONObject;
+begin
+  LObj:=TJSONObject.Create;
+  try
+    DoToJSON(LObj);
+    Result:=LObj.AsJSON;
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJ2PasObject.FromJSON(const AJSON: String);
+var
+  LData:TJSONData;
+  LObj:TJSONObject;
+begin
+  LData:=GetJSON(AJSON);
+  if LData.JSONType <> TJSONtype.jtObject then
+  begin
+    LData.Free;
+    LObj:=TJSONObject.Create;
+  end
+  else
+    LObj:=TJSONObject(LData);
+
+  try
+    DoFromJSON(LObj);
+  finally
+    LObj.Free;
+  end;
+end;
+
 class function TJ2PasObject.ObjectExists(const AProperties: TJ2PasProps; out
-  Index: Integer; const AAddIfFalse: Boolean;Const AName:String): Boolean;
+  Index: Integer; const AAddIfFalse: Boolean; const AName: String): Boolean;
 var
   I:Integer;
   LObj,
@@ -336,9 +521,18 @@ var
   procedure AddBasicType(Const AData:TJSONData;Const AName:String);
   var
     LProp:TJ2PasProp;
+    LName:String;
   begin
     LProp:=TJ2PasProp.Create;
     LProp.Name:=AName;
+
+    //format the name
+    if Assigned(DefaultPropertyNameFormat) then
+    begin
+      LName:=LProp.Name;
+      DefaultPropertyNameFormat(LName);
+      LProp.Name:=LName;
+    end;
 
     //map j2pas types
     LProp.JType:=JTypeToJ2PType(AData.JSONType,AData.Value);
@@ -357,6 +551,7 @@ var
     LObj:TJ2PasObject;
     LError:String;
     I:Integer;
+    LName:String;
   begin
     //if we cannot determine the type of the first value we cannot had the prop
     if not Assigned(AJSONArray) or (AJSONArray.Count < 1) then
@@ -405,6 +600,14 @@ var
         end;
     end;
 
+    //format the name
+    if Assigned(DefaultPropertyNameFormat) then
+    begin
+      LName:=LProp.Name;
+      DefaultPropertyNameFormat(LName);
+      LProp.Name:=LName;
+    end;
+
     //add property
     JObject.Properties.Add(LProp);
   end;
@@ -415,13 +618,22 @@ var
     LObj:TJ2PasObject;
     LError:String;
     I:Integer;
+    LName:String;
   begin
     LProp:=TJ2PasProp.Create;
-    LProp.Name:=AName;
+    LName:=AName;
+
+    //name formatting
+    if Assigned(DefaultObjectNameFormat) then
+      DefaultObjectNameFormat(LName);
+
+    //assign name to prop
+    LProp.Name:=LName;
+
     LProp.JType:=TJ2PasType.jtObject;
 
     //first look to see if this object exists by name, if not we need to add it
-    if not ObjectByName(Objects,AName,LObj) then
+    if not ObjectByName(Objects,LName,LObj) then
     begin
       //try to parse, if we can't free property
       if not Parse(AObject.AsJSON,LObj,LError) then
@@ -432,7 +644,7 @@ var
       //otherwise check for existance on properties, and add if exists
       //use the name that is set their rather than the one provided to us
       else
-        if ObjectExists(LObj.Properties,I,True,AName) then
+        if ObjectExists(LObj.Properties,I,True,LName) then
           LProp.Name:=Objects[I].Name;
     end;
 
@@ -513,6 +725,9 @@ end;
 
 initialization
   GlobalObjects:=TJ2PasObjects.Create(True);
+  DefaultPropertyNameFormat:=nil;
+  DefaultObjectNameFormat:=nil;
+  RegisterClasses([TJ2PasProp,TJ2PasArrayProp,TJ2PasArrayObject]);
 finalization
   GlobalObjects.Free;
 end.
