@@ -26,7 +26,7 @@
         <CommandLineParams Value="-t"/>
       </local>
     </RunParams>
-    <Units Count="3">
+    <Units Count="4">
       <Unit0>
         <Filename Value="json2pas_util.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -39,6 +39,10 @@
         <Filename Value="..\src\json2pas.producer.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit2>
+      <Unit3>
+        <Filename Value="..\src\json2pas.producer.std.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit3>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

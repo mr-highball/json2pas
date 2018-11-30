@@ -29,7 +29,7 @@ uses
   {$IFDEF UNIX}{$IFDEF UseCThreads}
   cthreads,
   {$ENDIF}{$ENDIF}
-  Classes, SysUtils, CustApp, json2pas, json2pas.producer;
+  Classes, SysUtils, CustApp, json2pas, json2pas.producer, unit1;
 
 type
 
