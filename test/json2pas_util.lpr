@@ -29,7 +29,8 @@ uses
   {$IFDEF UNIX}{$IFDEF UseCThreads}
   cthreads,
   {$ENDIF}{$ENDIF}
-  Classes, SysUtils, CustApp, json2pas, json2pas.producer, unit1;
+  Classes, SysUtils, CustApp, json2pas, json2pas.producer,
+  json2pas.producer.std, json2pas.producer.std.pascal;
 
 type
 
@@ -98,6 +99,15 @@ begin
 
   //add the compound object
   TJ2PasObject.ObjectExists(LObj.Properties,I,True,'TTestCompoundObj');
+
+  //now try to parse an object which has an array of compound objects
+  if not TJ2PasObject.Parse('{"test_array_of_objects_property":[{"test_object_property":{"test_property":["hello world"]}}]}',LObj,LError) then
+  begin
+    WriteLn(LError);
+  end;
+
+  //add the array of object object
+  TJ2PasObject.ObjectExists(LObj.Properties,I,True,'TTestArrayObject');
 
   //show user output
   for I:=0 to Pred(TJ2PasObject.Objects.Count) do

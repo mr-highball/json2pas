@@ -121,7 +121,7 @@ type
       children override this method to prepare the source for
       a given file, by being provided objects
     *)
-    function PrepareSource(Const AObjects:TJ2PasObjects;
+    function PrepareSource(Const AUnitName:String;Const AObjects:TJ2PasObjects;
       Out Source,Error:String):Boolean;virtual;abstract;
   public
     property Units : TUnits read GetUnits;
@@ -257,7 +257,7 @@ begin
   for I := 0 to Pred(FMap.Count) do
   begin
     //call virtual prepare to generate the source
-    if not PrepareSource(FMap.Data[I],LSource,Error) then
+    if not PrepareSource(FMap.Keys[I],FMap.Data[I],LSource,Error) then
       Exit;
 
     //update source
