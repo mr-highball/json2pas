@@ -55,6 +55,7 @@ type
   TJ2PasProp = class(TPersistent)
   strict private
     FName: String;
+    FOrgName: String;
     FType: TJ2PasType;
   protected
     procedure AssignTo(Dest: TPersistent); override;
@@ -63,6 +64,7 @@ type
     procedure DoFromJSON(Const AObject:TJSONObject);virtual;
   public
     property Name : String read FName write FName;
+    property OriginalName : String read FOrgName write FOrgName;
     property JType : TJ2PasType read FType write FType;
     property MetaClass : TJ2PasPropClass read GetMeta;
     function Equals(Obj: TObject): boolean; override;
@@ -241,14 +243,14 @@ begin
   Result:=TJ2PasProp;
 end;
 
-procedure TJ2PasProp.DoToJSON(Const AObject:TJSONObject);
+procedure TJ2PasProp.DoToJSON(const AObject: TJSONObject);
 begin
   AObject.Add('name',FName);
   AObject.Add('type',Ord(FType));
   AObject.Add('meta',GetMeta.ClassName);
 end;
 
-procedure TJ2PasProp.DoFromJSON(Const AObject:TJSONObject);
+procedure TJ2PasProp.DoFromJSON(const AObject: TJSONObject);
 begin
   FName:=AObject.Get('name','');
   FType:=TJ2PasType(AObject.Get('type',Ord(TJ2PasType.jtString)));
@@ -525,6 +527,7 @@ var
   begin
     LProp:=TJ2PasProp.Create;
     LProp.Name:=AName;
+    LProp.OriginalName:=AName;
 
     //format the name
     if Assigned(DefaultPropertyNameFormat) then
@@ -567,6 +570,7 @@ var
           LProp:=TJ2PasArrayProp.Create;
           LProp.JType:=TJ2PasType.jtArray;
           LProp.Name:=AName;
+          LProp.OriginalName:=AName;
           TJ2PasArrayProp(LProp).JType:=JTypeToJ2PType(LData.JSONType,LData.Value);
         end;
       TJSONtype.jtArray:
@@ -576,6 +580,7 @@ var
           LProp:=TJ2PasArrayProp.Create;
           LProp.JType:=TJ2PasType.jtArray;
           LProp.Name:=AName;
+          LProp.OriginalName:=AName;
           TJ2PasArrayProp(LProp).ArrayType:=TJ2PasType.jtString;
         end;
       TJSONtype.jtObject:
@@ -583,6 +588,7 @@ var
           LProp:=TJ2PasArrayObject.Create;
           LProp.JType:=TJ2PasType.jtArray;
           LProp.Name:=AName;
+          LProp.OriginalName:=AName;
           TJ2PasArrayObject(LProp).ArrayType:=TJ2PasType.jtObject;
 
           //attempt to parse this object
@@ -629,6 +635,7 @@ var
 
     //assign name to prop
     LProp.Name:=LName;
+    LProp.OriginalName:=AName;
 
     LProp.JType:=TJ2PasType.jtObject;
 

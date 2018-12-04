@@ -29,7 +29,7 @@ uses
   {$IFDEF UNIX}{$IFDEF UseCThreads}
   cthreads,
   {$ENDIF}{$ENDIF}
-  Classes, SysUtils, CustApp, json2pas, json2pas.producer,
+  Classes, SysUtils, CustApp, strutils, json2pas, json2pas.producer,
   json2pas.producer.std, json2pas.producer.std.pascal;
 
 type
@@ -81,6 +81,8 @@ var
   LObj:TJ2PasObject;
   LError:String;
   I:Integer;
+  LProducer:IStandardProducer;
+  LUnits:TUnits;
 begin
   //attempt to parse a simple json object with one property
   if not TJ2PasObject.Parse('{"test_property":["hello world"]}',LObj,LError) then
@@ -109,9 +111,40 @@ begin
   //add the array of object object
   TJ2PasObject.ObjectExists(LObj.Properties,I,True,'TTestArrayObject');
 
+  WriteLn('Showing Object MetaData',sLineBreak,DupeString('-',30));
+
   //show user output
   for I:=0 to Pred(TJ2PasObject.Objects.Count) do
     WriteLn(TJ2PasObject.Objects[I].ToJSON);
+
+  WriteLn(sLineBreak,'Generated Source Code',sLineBreak,DupeString('-',30));
+
+  //make a code producer of your choice, in this case we use std.pascal
+  LProducer:=TStandardProducerImpl.Create;//todo - change this to pascal
+
+  //try to make a unit called testunit
+  if not LProducer.NewUnit('testunit',TJ2PasObject.Objects,LError) then
+  begin
+    WriteLn('an error occurred: ',LError);
+    Exit;
+  end;
+
+  //attempt to finalize the units
+  if not LProducer.Finalize(LError) then
+  begin
+    WriteLn('an error occurred: ',LError);
+    Exit;
+  end;
+
+  //copy the units and output to screen
+  LUnits:=LProducer.Units;
+  WriteLn('Generated Unit Count: ',Length(LUnits));
+  for I := 0 to High(LUnits) do
+    WriteLn(
+      LUnits[I].Filename,sLineBreak,
+      DupeString('-',10),sLineBreak,
+      LUnits[I].Source,sLineBreak
+    );
 end;
 
 { TJSON2PasMain }

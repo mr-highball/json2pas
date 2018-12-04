@@ -101,7 +101,8 @@ type
   strict protected
     function DoWrite(Const AObjects:TJ2PasObjects;
       Out Content,Error:String):Boolean;virtual;abstract;
-    procedure Indent(Const AInput:String;Out Output:String);
+    procedure Indent(Const AInput:String;Out Output:String;
+      Const AIndentLevel:Integer=-1;Const AIndention:String='');
   public
     property IndentLevel : Integer read GetIndentLevel write SetIndentLevel;
     property Indention : String read GetIndention write SetIndention;
@@ -120,9 +121,12 @@ type
     use it as a reference for implementing your own.
     the main functionality comes from the section writers which are responsible
     for breaking a source file into consecutive pieces and tackling the code generation
-    (ie. interface section, implementation, etc...)
+    (ie. interface section, implementation, etc...).
+    if you do not want to deal with implementing individual writers or have
+    an entirely different way to do this, just inherit from TUnitProducerImpl
+    and override the PrepareSource virtual method
   *)
-  TStandardProducerImpl = class(TUnitProducerImpl)
+  TStandardProducerImpl = class(TUnitProducerImpl,IStandardProducer)
   strict private
     FWriters: TSectionWriters;
   strict protected
@@ -178,13 +182,28 @@ begin
   Result:=FIndentLevel;
 end;
 
-procedure TSectionWriterImpl.Indent(const AInput: String; out Output: String);
+procedure TSectionWriterImpl.Indent(const AInput: String; out Output: String;
+  const AIndentLevel: Integer; const AIndention: String);
 var
-  I:Integer;
+  I,
+  LLvl:Integer;
   LTmp:TStringList;
+  LIndent:String;
 begin
+  //use param if not default, otherwise use property value
+  if AIndentLevel > 0 then
+    LLvl:=AIndentLevel
+  else
+    LLvl:=FIndentLevel;
+
+  //use param if not default, otherwise use property value
+  if AIndention <> '' then
+    LIndent:=AIndention
+  else
+    LIndent:=FIndention;
+
   //if we don't have an indention level or our indent character is empty exit
-  if (FIndentLevel <= 0) or (FIndention.Length < 1) then
+  if (LLvl <= 0) or (LIndent.Length < 1) then
   begin
     Output:=AInput;
     Exit;
@@ -199,7 +218,7 @@ begin
       //if we are ignoring indent of a particular line index
       //the line doesn't need to change
       if FIgnoreLines.IndexOf(I) < 0 then
-        LTmp[I]:=DupeString(FIndention,FIndentLevel) + LTmp[I];
+        LTmp[I]:=DupeString(LIndent,LLvl) + LTmp[I];
     end;
   finally
     LTmp.Free;
