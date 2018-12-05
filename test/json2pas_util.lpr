@@ -120,7 +120,7 @@ begin
   WriteLn(sLineBreak,'Generated Source Code',sLineBreak,DupeString('-',30));
 
   //make a code producer of your choice, in this case we use std.pascal
-  LProducer:=TStandardProducerImpl.Create;//todo - change this to pascal
+  LProducer:=TPascalProducerImpl.Create;//todo - change this to pascal
 
   //try to make a unit called testunit
   if not LProducer.NewUnit('testunit',TJ2PasObject.Objects,LError) then

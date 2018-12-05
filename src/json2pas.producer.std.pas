@@ -101,8 +101,8 @@ type
   strict protected
     function DoWrite(Const AObjects:TJ2PasObjects;
       Out Content,Error:String):Boolean;virtual;abstract;
-    procedure Indent(Const AInput:String;Out Output:String;
-      Const AIndentLevel:Integer=-1;Const AIndention:String='');
+    function Indent(Const AInput:String;Const AIndentLevel:Integer=-1;
+      Const AIndention:String='') : String;
   public
     property IndentLevel : Integer read GetIndentLevel write SetIndentLevel;
     property Indention : String read GetIndention write SetIndention;
@@ -182,30 +182,39 @@ begin
   Result:=FIndentLevel;
 end;
 
-procedure TSectionWriterImpl.Indent(const AInput: String; out Output: String;
-  const AIndentLevel: Integer; const AIndention: String);
+function TSectionWriterImpl.Indent(const AInput: String;
+  const AIndentLevel: Integer; const AIndention: String): String;
 var
   I,
   LLvl:Integer;
   LTmp:TStringList;
   LIndent:String;
+  LDontIgnore:Boolean;
 begin
+  LDontIgnore:=False;
+
   //use param if not default, otherwise use property value
   if AIndentLevel > 0 then
-    LLvl:=AIndentLevel
+  begin
+    LLvl:=AIndentLevel;
+    LDontIgnore:=True;
+  end
   else
     LLvl:=FIndentLevel;
 
   //use param if not default, otherwise use property value
   if AIndention <> '' then
-    LIndent:=AIndention
+  begin
+    LIndent:=AIndention;
+    LDontIgnore:=True;
+  end
   else
     LIndent:=FIndention;
 
   //if we don't have an indention level or our indent character is empty exit
   if (LLvl <= 0) or (LIndent.Length < 1) then
   begin
-    Output:=AInput;
+    Result:=AInput;
     Exit;
   end;
 
@@ -217,9 +226,11 @@ begin
     begin
       //if we are ignoring indent of a particular line index
       //the line doesn't need to change
-      if FIgnoreLines.IndexOf(I) < 0 then
+      if LDontIgnore or (FIgnoreLines.IndexOf(I) < 0) then
         LTmp[I]:=DupeString(LIndent,LLvl) + LTmp[I];
     end;
+
+    Result:=LTmp.Text;
   finally
     LTmp.Free;
   end;
@@ -235,7 +246,7 @@ begin
       Exit;
 
     //next, handle the indention of the content
-    Indent(Content,Content);
+    Content:=Indent(Content);
 
     //success
     Result:=True;

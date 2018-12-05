@@ -177,11 +177,11 @@ type
       INTF_TEMPLATE =
         '%s = interface' + sLineBreak +
         '%s' + sLineBreak + //interface guid
-        '//property methods' + sLineBreak +
+        '  //property methods' + sLineBreak +
         '%s' + sLineBreak +
-        '//properties' + sLineBreak +
+        '  //properties' + sLineBreak +
         '%s' + sLineBreak +
-        '//methods' + sLineBreak +
+        '  //methods' + sLineBreak +
         '%s' + sLineBreak +
         'end;'; //interface is finished
   strict private
@@ -200,9 +200,91 @@ type
     constructor Create(Const ASectionIdentifer:String); override;
   end;
 
+  IPascalProducer = interface
+    ['{2154A13D-477C-43D6-88A2-4C667A32FE04}']
+  end;
+
+  { TPascalProducerImpl }
+
+  TPascalProducerImpl = class(TStandardProducerImpl,IPascalProducer)
+  strict private
+    FHeader: IHeaderSection;
+    FUses: IIntfUsesSection;
+    FType: ITypeSection;
+  strict protected
+    function PrepareSource(const AUnitName: String;
+      const AObjects: TJ2PasObjects; out Source, Error: String): Boolean;
+      override;
+    procedure DoAddWriters(const AWriters: TSectionWriters); override;
+  public
+    constructor Create; override;
+    destructor Destroy; override;
+  end;
+
 implementation
 uses
   strutils;
+
+function GetCollectionName(Const AType:String;Const AIsBasicType:Boolean=True;
+  Const AIncludeDefinition:Boolean=False):String;
+begin
+  Result:='';
+  if AIsBasicType then
+    Result:='T' + AType + 'List' + IfThen(
+      AIncludeDefinition,
+      ' = TFPGList<' + AType + '>;',
+      ''
+    )
+  else
+    Result:=AType + 's' + IfThen(
+      AIncludeDefinition,
+      ' = TFPGInterfacedObjectList<' + AType + '>;',
+      ''
+    );
+end;
+
+{ TPascalProducerImpl }
+
+function TPascalProducerImpl.PrepareSource(const AUnitName: String;
+  const AObjects: TJ2PasObjects; out Source, Error: String): Boolean;
+begin
+  //configure writers
+  FHeader.UnitName:=AUnitName;
+  //FType.InclIntf:=FIncludeIntf;//todo - make this a property
+  Result:=inherited PrepareSource(AUnitName, AObjects, Source, Error);
+end;
+
+procedure TPascalProducerImpl.DoAddWriters(const AWriters: TSectionWriters);
+begin
+  AWriters.Add(FHeader);
+  AWriters.Add(FUses);
+  AWriters.Add(FType);
+end;
+
+constructor TPascalProducerImpl.Create;
+begin
+  inherited Create;
+  FHeader:=THeaderSectionImpl.Create('header');
+
+  //initialize units
+  FUses:=TIntfUsesSectionImpl.Create('interface_uses');
+  FUses.IndentLevel:=1;
+  FUses.Units.Add('fgl');
+  FUses.Units.Add('fpjson');
+  FUses.Units.Add('jsonparser');
+
+  //initialize type
+  FType:=TTypeSectionImpl.Create('type');
+  FType.IndentLevel:=1;
+end;
+
+destructor TPascalProducerImpl.Destroy;
+begin
+  FHeader:=nil;
+  FUses:=nil;
+  FType:=nil;
+  inherited Destroy;
+end;
 
 { TTypeSectionImpl }
 
@@ -232,13 +314,14 @@ var
   I:Integer;
   LTmp:TStringList;
 
-  //todo - move these to public signature so we can "cheat" when doing
-  //the implementation code
+  //todo - most of these methods can be shared, need to either move them
+  //to protected/public or just make them standard methods outside of object
+
   function FormatIntfName(Const AName:String):String;
   begin
     //zero length names exit
     if AName.Length < 1 then
-      Exit('');
+      Exit('INoName');
 
     if AName.Length = 1 then
       Exit('I' + AName);
@@ -256,49 +339,124 @@ var
     Result:=AName + 'Impl';
   end;
 
-  function PropertyMethods(Const AObject:TJ2PasObject) : String;
+  //helper for translating jtypes
+  function BasicJTypeToType(Const AJType:TJ2PasType):String;
   begin
     Result:='';
-    //todo - return the private property methods
+    case AJType of
+      jtBool: Exit('Boolean');
+      jtString: Exit('String');
+      jtInt: Exit('Integer');
+      jtFloat: Exit('Single');
+    end;
+  end;
+
+  function PropertyMethods(Const AObject:TJ2PasObject) : String;
+  var
+    I:Integer;
+    LTmp:TStringList;
+  begin
+    Result:='';
+
+    LTmp:=TStringList.Create;
+    try
+      //loop through properties and concatenate
+      for I := 0 to Pred(AObject.Properties.Count) do
+      begin
+        //todo - depending on jtype handle this a little differently
+        case AObject.Properties[I].JType of
+          jtBool, jtString, jtInt, jtFloat:
+            begin
+              Result:=Result + 'function Get' + AObject.Properties[I].Name;
+            end;
+          jtArray:
+            begin
+              //todo
+            end;
+          jtObject:
+            begin
+              //todo
+            end;
+        end;
+      end;
+      Result:=LTmp.Text;
+    finally
+      LTmp.Free;
+    end;
   end;
 
   function Properties(Const AObject:TJ2PasObject) : String;
   var
     I:Integer;
+    LName:String;
+
   begin
     //todo - return the public property signatures
     Result:='';
     for I := 0 to Pred(AObject.Properties.Count) do
+    begin
+      //new property
+      if I <> 0 then
+        Result:=Result + sLineBreak;
+
+      //get the property name
+      LName:=AObject.Properties[I].Name;
+
+      //depending on the jtype format the property differently
       case AObject.Properties[I].JType of
-        jtBool:
+        jtBool, jtString, jtInt, jtFloat:
           begin
-            //todo - simple bool prop
-          end;
-        jtString:
-          begin
-            //todo - simple string prop
-          end;
-        jtInt:
-          begin
-            //todo - simple int prop
-          end;
-        jtFloat:
-          begin
-            //todo - simple float prop;
+            Result:=
+              Result + 'property ' +
+              LName + ' : ' +
+              BasicJTypeToType(AObject.Properties[I].JType) + ' read Get' +
+              LName + ' write Set' + LName +';';
           end;
         jtArray:
           begin
-            //todo - either simple or array of object
+            if TJ2PasArrayProp(AObject.Properties[I]).ArrayType = jtObject then
+              Result:=
+                Result + 'property ' +
+                LName + ' : ' +
+                GetCollectionName(LName,False,False) + ' read Get' +
+                LName + ' write Set' + LName +';'
+            else
+              Result:=
+                Result + 'property ' +
+                LName + ' : ' +
+                GetCollectionName(
+                  FormatIntfName(TJ2PasArrayObject(AObject.Properties[I]).ObjectName),
+                  True,
+                  False
+                ) + ' read Get' +
+                LName + ' write Set' +
+                LName +';'
           end;
         jtObject:
           begin
-            //todo - object property, use interface
+            //format as an interface (which guarantees at least 2 chars)
+            //then remove the first one (ie. ICar -> Car)
+            LName:=FormatIntfName(LName);
+            LName:=Copy(LName,2,LName.Length - 1);
+            Result:=
+              Result + 'property ' +
+              LName + ' : ' +
+              FormatIntfName(LName) + ' read Get' +
+              LName + ' write Set' +
+              LName +';'
           end;
       end;
+    end;
   end;
 
-  function MethodSignatures(Const AObject:TJ2PasObject;
-    Const AIntf:Boolean=False) : String;
+  function ProtectedMethods : String;
+  begin
+    Result:=
+      'function DoToJSON:String;virtual;' + sLineBreak +
+      'function FromJSON:String;virtual;';
+  end;
+
+  function MethodSignatures(Const AIntf:Boolean=False) : String;
   begin
     Result:=
       'function ToJSON:String;' + sLineBreak +
@@ -324,23 +482,53 @@ begin
       //and/or implementation definitions to content
       if FIncIntf then
       begin
-        //first pass write all of the interface definitions replacing the
-        //first 'T' (if any) and prefixing 'I' to the object name
+        //for each of the objects, fill out the interface template
         for I := 0 to Pred(AObjects.Count) do
         begin
-
+          LTmp.Add(
+            Format(
+              INTF_TEMPLATE,
+              [
+                FormatIntfName(AObjects[I].Name),
+                Indent(TGuid.NewGuid.ToString(False),1),
+                Indent(PropertyMethods(AObjects[I]),1),
+                Indent(Properties(AObjects[I]),1),
+                Indent(MethodSignatures(True),1)
+              ]
+            ) + sLineBreak
+          );
         end;
       end;
 
       if FIncImpl then
       begin
-        //next write, the implementation definition, and append 'Impl'
-        //to the end of the object name
-        //...
+        //for each object fill out the object template
+        for I := 0 to Pred(AObjects.Count) do
+        begin
+          LTmp.Add(
+            Format(
+              OBJECT_TEMPLATE,
+              [
+                FormatObjName(AObjects[I].Name),
+                'TInterfacedObject',
+                FormatIntfName(AObjects[I].Name),
+                '//TODO - property consts',
+                '//TODO - private properties',
+                Indent(PropertyMethods(AObjects[I]),1),
+                Indent(ProtectedMethods,1),
+                Indent(Properties(AObjects[I]),1),
+                Indent(MethodSignatures(False),1)
+              ]
+            ) + sLineBreak
+          );
+        end;
       end;
 
+      //append to content
+      Content:=Content + LTmp.Text;
+
       //success
-      //Result:=True;
+      Result:=True;
     finally
       LTmp.Free;
     end;
@@ -354,6 +542,7 @@ begin
   inherited Create(ASectionIdentifer);
   FIncImpl:=True;
   FIncIntf:=True;
+  IndentIgnoreLines.Add(0);
 end;
 
 { TImplUsesSectionImpl }
@@ -414,7 +603,7 @@ begin
 
     //if we have any units then append to the end
     if FUnits.Count > 0 then
-      Content:=Content + 'uses' + sLineBreak + FUnits.Text;
+      Content:=Content + 'uses' + sLineBreak + FUnits.CommaText + ';';
     Result:=True;
   except on E:Exception do
     Error:=E.Message;
@@ -429,9 +618,8 @@ begin
   //we ignore the 'interface' line for indents
   IndentIgnoreLines.Add(0);
 
-  //ignore line break after interface, and ignore 'uses'
+  //ignore 'uses'
   IndentIgnoreLines.Add(1);
-  IndentIgnoreLines.Add(2);
 end;
 
 destructor TIntfUsesSectionImpl.Destroy;
