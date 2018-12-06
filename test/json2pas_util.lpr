@@ -85,27 +85,30 @@ var
   LUnits:TUnits;
 begin
   //attempt to parse a simple json object with one property
-  if not TJ2PasObject.Parse('{"test_property":["hello world"]}',LObj,LError) then
+  if not TJ2PasObject.Parse('{"test_property":["hello world"], "test_strings":[""]}',LObj,LError) then
   begin
     WriteLn(LError);
+    Exit;
   end;
 
   //add the object to global
   TJ2PasObject.ObjectExists(LObj.Properties,I,True,'TTestObj');
 
   //now try to add parse an object which has a object property
-  if not TJ2PasObject.Parse('{"test_object_property":{"test_property":["hello world"]}}',LObj,LError) then
+  if not TJ2PasObject.Parse('{"test_object_property":{"test_property":["hello world"], "test_strings":[""]}}',LObj,LError) then
   begin
     WriteLn(LError);
+    Exit;
   end;
 
   //add the compound object
   TJ2PasObject.ObjectExists(LObj.Properties,I,True,'TTestCompoundObj');
 
   //now try to parse an object which has an array of compound objects
-  if not TJ2PasObject.Parse('{"test_array_of_objects_property":[{"test_object_property":{"test_property":["hello world"]}}]}',LObj,LError) then
+  if not TJ2PasObject.Parse('{"test_array_of_objects_property":[{"test_object_property":{"test_property":["hello world"], "test_strings":[""]}}]}',LObj,LError) then
   begin
     WriteLn(LError);
+    Exit;
   end;
 
   //add the array of object object

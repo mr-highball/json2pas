@@ -262,6 +262,7 @@ begin
     Exit;
   TJ2PasProp(Dest).Name:=FName;
   TJ2PasProp(Dest).JType:=FType;
+  TJ2PasProp(Dest).OriginalName:=FOrgName;
 end;
 
 function TJ2PasProp.Equals(Obj: TObject): boolean;
@@ -571,7 +572,7 @@ var
           LProp.JType:=TJ2PasType.jtArray;
           LProp.Name:=AName;
           LProp.OriginalName:=AName;
-          TJ2PasArrayProp(LProp).JType:=JTypeToJ2PType(LData.JSONType,LData.Value);
+          TJ2PasArrayProp(LProp).ArrayType:=JTypeToJ2PType(LData.JSONType,LData.Value);
         end;
       TJSONtype.jtArray:
         begin
