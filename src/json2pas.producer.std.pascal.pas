@@ -30,6 +30,33 @@ uses
   Classes, SysUtils, json2pas, json2pas.producer.std;
 
 type
+
+  TMetaType = (mtSimple, mtObject, mtCollection, mtObjectCollection);
+
+  { TMetadata }
+  (*
+    simple structure for holding some meta data on a j2pas object
+    that can be used to construct a pascal unit
+  *)
+  TMetadata = record
+  strict private
+    FCollectName: String;
+    FConstName: String;
+    FConstVal: String;
+    FFieldName: String;
+    FFieldType: String;
+    FType: TMetaType;
+  public
+    property ConstantName : String read FConstName write FConstName;
+    property ConstantValue : String read FConstVal write FConstVal;
+    property FieldName : String read FFieldName write FFieldName;
+    property FieldType : String read FFieldType write FFieldType;
+    property CollectionName : String read FCollectName write FCollectName;
+    property MetaType : TMetaType read FType write FType;
+  end;
+
+  TMetaDatas = array of TMetadata;
+
   { IHeaderSection }
   (*
     base interface for pascal header sections
@@ -203,6 +230,18 @@ type
   { TImplSectionImpl }
 
   TImplSectionImpl = class(TSectionWriterImpl,IImplSection)
+  strict protected
+    const
+      FUNC_TEMPLATE =
+        'function %s(%s):%s;' + sLineBreak + //name | args | return
+        'begin' + sLineBreak +
+        '%s' + sLineBreak + // method body
+        'end;';
+      PROC_TEMPLATE =
+        'procedure %s(%s);' + sLineBreak + //name | args
+        'begin' + sLineBreak +
+        '%s' + sLineBreak + // method body
+        'end;';
   strict private
   strict protected
     function DoWrite(const AObjects: TJ2PasObjects;
@@ -222,6 +261,7 @@ type
     FUses: IIntfUsesSection;
     FType: ITypeSection;
     FImplUses: IImplUsesSection;
+    FImpl: IImplSection;
   strict protected
     function PrepareSource(const AUnitName: String;
       const AObjects: TJ2PasObjects; out Source, Error: String): Boolean;
@@ -392,7 +432,6 @@ var
   LName:String;
 
 begin
-  //todo - return the public property signatures
   Result:='';
   for I := 0 to Pred(AObject.Properties.Count) do
   begin
@@ -449,6 +488,38 @@ begin
   end;
 end;
 
+function PrivateVars(Const AObject:TJ2PasObject):String;
+const
+  START = Length('property ') + 1;
+var
+  I:Integer;
+  LTmp:TStringList;
+begin
+  Result:='';
+  LTmp:=TStringList.Create;
+  try
+    //already wrote the public property code so going to cheat and parse
+    LTmp.Text:=Properties(AObject);
+    for I := 0 to Pred(LTmp.Count) do
+    begin
+      //use result as a buffer to parse the type
+      Result:=Copy(LTmp[I],START,LTmp[I].Length - START);
+      Result:=Copy(Result,Succ(Result.IndexOf(': ')),Result.Length);
+      Result:=Copy(Result,1,Result.IndexOf(' read'));
+
+      //copy the name of the variable and prefix 'F' and append the type
+      LTmp[I]:='F' + Copy(
+        LTmp[I],
+        START,
+        LTmp[I].IndexOf(': ') - START
+      ) + Result +  ';';
+    end;
+    Result:=LTmp.Text;
+  finally
+    LTmp.Free;
+  end;
+end;
+
 function PropertyConst(Const AProperty:TJ2PasProp):String;
 const
   LOW_CHAR = Ord('A');
@@ -489,32 +560,212 @@ begin
   Result:='PROP_' + Result;
 end;
 
+function GetMetadata(Const AObject:TJ2PasObject):TMetadatas;
+var
+  I:Integer;
+  LProps:TStringList;
+  LProp:TJ2PasProp;
+begin
+  (*
+    note to others:
+    this method may move... or go away entirely just as all the other
+    non member methods. these were mainly a way to "get started" with this
+    library to try some different ideas out
+  *)
+
+  //init the result to the length of the properties
+  SetLength(Result,AObject.Properties.Count);
+
+  LProps:=TStringList.Create;
+  try
+    //fragile... but done after a lot of quick text parse hackery was
+    //written, so this may get cleaned up later. anyway, this should
+    //always guarantee proper ordering of properties
+    LProps.NameValueSeparator:=':';
+    LProps.Text:=PrivateVars(AObject).Replace(';','').Replace(' ','');
+
+    //iterate properties and fill out the result metadata records
+    for I := 0 to Pred(AObject.Properties.Count) do
+    begin
+      LProp:=AObject.Properties[I];
+
+      //assign "common" meta data values
+      Result[I].ConstantName:=PropertyConst(LProp);
+      Result[I].ConstantValue:=LProp.OriginalName;
+      Result[I].FieldName:=LProps.Names[I];
+      Result[I].FieldType:=LProps.ValueFromIndex[I];
+
+      //split out logic for simple/object/array types when dealing
+      //with the collection name and metatype (corresponds to FieldType string)
+      if LProp.JType in [jtBool,jtInt,jtFloat,jtString] then
+      begin
+        Result[I].CollectionName:=GetCollectionName(LProp.Name);
+        Result[I].MetaType:=mtSimple;
+      end
+      else if LProp.JType = jtObject then
+      begin
+        Result[I].CollectionName:=GetCollectionName(FormatIntfName(LProp.Name),False);
+        Result[I].MetaType:=mtObject;
+      end
+      else if LProp.JType = jtArray then
+      begin
+        //collection of simple types
+        if TJ2PasArrayProp(LProp).ArrayType in [jtBool,jtInt,jtFloat,jtString] then
+        begin
+          Result[I].CollectionName:=GetCollectionName(LProp.Name);
+          Result[I].MetaType:=mtCollection;
+        end
+        //collection of object
+        else
+        begin
+          Result[I].CollectionName:=GetCollectionName(FormatIntfName(TJ2PasArrayObject(LProp).ObjectName));
+          Result[I].MetaType:=mtObjectCollection;
+        end;
+      end;
+    end;
+  finally
+    LProps.Free;
+  end;
+end;
+
 { TImplSectionImpl }
 
 function TImplSectionImpl.DoWrite(const AObjects: TJ2PasObjects; out Content,
   Error: String): Boolean;
+const
+  CATCH_TEMPLATE =
+    'try' + sLineBreak +
+    '%s' + sLineBreak +
+    'except on E:Exception do' + sLineBreak +
+    '%s' + sLineBreak +
+    'end;';
+  TRY_TEMPLATE =
+    'try' + sLineBreak +
+    '%s' + sLineBreak +
+    'finally' + sLineBreak +
+    '%s' + sLineBreak +
+    'end;';
 var
   I:Integer;
   LTmp:TStringList;
+
+  function GetFromJSON(Const AObject:TJ2PasObject):String;
+  var
+    I:Integer;
+    LData:TMetadatas;
+    LTmp:TStringList;
+  begin
+    //fetch metadata for the object
+    LData:=GetMetadata(AObject);
+
+    LTmp:=TStringList.Create;
+    try
+      {$IFDEF FPC}
+      //handle initial json parsing
+      LTmp.Add('LData:=GetJSON(AJSON);');
+      LTmp.Add('if not Assigned(LData) or (LData.JsonType <> jtObject) then');
+      LTmp.Add(
+        Indent(
+          'raise Exception.Create(' +
+          QuotedStr('DoFromJSON::invalid JSON object in ')
+          + ' + Self.Classname);',
+          1
+        )
+      );
+
+      //cast to object
+      LTmp.Add(sLineBreak + '//cast TJSONData -> TJSONObject');
+      LTmp.Add('LObj:=TJSONObject(LData);');
+
+      //iterate our metadata to fill out method content
+      for I := 0 to High(LData) do
+      begin
+        //depending on the type of the property (basic/object/collection)
+        //we will need to handle the assignment differently. additionally,
+        //we may want to handle the concept of "required" or "not-required"
+        //properties inside the JSON, or defaults when non-existant
+        //case...
+          //simple type we can just assign
+          //...
+
+          //object type call the FromJSON method
+          //...
+
+          //collection type has both simple and object types
+          //that need to be handle the same as above
+          //...
+      end;
+      {$ELSE}
+      LTmp.Add('//todo - automatic json impl not done for delphi yet... use fpc :)');
+      {$ENDIF}
+
+      //use result as buffer for the method content
+      Result:=LTmp.Text;
+    finally
+      LTmp.Free;
+    end;
+
+    //todo - use consts to lookup in json and set to priv field
+    Result:=Format(
+      FUNC_TEMPLATE,
+      [
+        'DoFromJSON',
+        'Const AJSON:String;Out Error:String',
+        'Boolean;virtual',
+        Indent(
+          Format(CATCH_TEMPLATE,
+            [
+            ]
+          ),
+          1
+        )
+      ]
+    );
+  end;
+
+  function GetToJSON(Const AObject:TJ2PasObject):String;
+  begin
+    //todo - use const and value of priv to construct a json object
+  end;
+
+  function GetPropMethods(Const AObject:TJ2PasObject):String;
+  begin
+    //todo - hack together something
+  end;
+
+  function GetConstructor(Const AObject:TJ2PasObject):String;
+  begin
+    //todo - defaults for private vars/objects
+  end;
+
+  function GetDestructor(Const AObject:TJ2PasObject):String;
+  begin
+    //todo - nil out interfaces and free objects
+  end;
+
 begin
   Result:=False;
   Content:='';
   try
-    //todo - for all objects, write implementation methods
+    //for each object in the unit make calls to localized helper
+    //methods to generate the implementation code
     LTmp:=TStringList.Create;
     try
       for I := 0 to Pred(AObjects.Count) do
       begin
-        //todo - write DoFromJSON
-        //todo - write DoToJSON
-        //todo - write all property methods (getters/setters)
-        //todo - write constructor
-        //todo - write destructor
-        Error:='not implemented';
+        LTmp.Add(GetPropMethods(AObjects[I]));
+        LTmp.Add(GetFromJSON(AObjects[I]));
+        LTmp.Add(GetToJSON(AObjects[I]));
+        LTmp.Add(GetConstructor(AObjects[I]));
+        LTmp.Add(GetDestructor(AObjects[I]));
 
         //success
         //Result:=True;
+        Error:='not implemented';//deleteme
       end;
+
+      //update content with tmp
+      Content:=LTmp.Text;
     finally
       LTmp.Free;
     end;
@@ -540,6 +791,7 @@ begin
   AWriters.Add(FUses);
   AWriters.Add(FType);
   AWriters.Add(FImplUses);
+  AWriters.Add(FImpl);
 end;
 
 constructor TPascalProducerImpl.Create;
@@ -550,17 +802,30 @@ begin
   //initialize units
   FUses:=TIntfUsesSectionImpl.Create('interface_uses');
   FUses.IndentLevel:=1;
+  {$IFDEF FPC}
   FUses.Units.Add('fgl');
+  {$ELSE}
+  //delphi specific uses
+  FUses.Units.Add('System.Collections.Generics');//not tested or impl right now
+  {$ENDIF}
 
   //initialize impl units
   FImplUses:=TImplUsesSectionImpl.Create('implementation_uses');
   FImplUses.IndentLevel:=1;
+  {$IFDEF FPC}
   FImplUses.Units.Add('fpjson');
   FImplUses.Units.Add('jsonparser');
+  {$ELSE}
+  //delphi specific impl units
+  {$ENDIF}
 
   //initialize type
   FType:=TTypeSectionImpl.Create('type');
   FType.IndentLevel:=1;
+
+  //initialize impl
+  FImpl:=TImplSectionImpl.Create('implementation');
+  FImpl.IndentLevel:=0;
 end;
 
 destructor TPascalProducerImpl.Destroy;
@@ -618,38 +883,6 @@ var
         LTmp.Add(PropertyConst(AObject.Properties[I]) +
           ' = ' + QuotedStr(AObject.Properties[I].OriginalName) + ';'
         );
-      Result:=LTmp.Text;
-    finally
-      LTmp.Free;
-    end;
-  end;
-
-  //return the private vars and the type
-  function PrivateVars(Const AObject:TJ2PasObject):String;
-  const
-    START = Length('property ') + 1;
-  var
-    I:Integer;
-    LTmp:TStringList;
-  begin
-    Result:='';
-    LTmp:=TStringList.Create;
-    try
-      //already wrote the public property code so going to cheat and parse
-      LTmp.Text:=Properties(AObject);
-      for I := 0 to Pred(LTmp.Count) do
-      begin
-        //use result as a buffer
-        Result:=Copy(LTmp[I],START,LTmp[I].Length - START);
-        Result:=Copy(Result,Succ(Result.IndexOf(': ')),Result.Length);
-
-        //copy up to the type
-        LTmp[I]:=Copy(
-          LTmp[I],
-          START,
-          Result.IndexOf(' ',Result.IndexOf(': ',START)) - START
-        ) + ';';
-      end;
       Result:=LTmp.Text;
     finally
       LTmp.Free;
