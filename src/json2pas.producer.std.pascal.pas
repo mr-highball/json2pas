@@ -660,7 +660,6 @@ var
 
     LTmp:=TStringList.Create;
     try
-      {$IFDEF FPC}
       //handle initial json parsing
       LTmp.Add('LData:=GetJSON(AJSON);');
       LTmp.Add('if not Assigned(LData) or (LData.JsonType <> jtObject) then');
@@ -695,9 +694,6 @@ var
           //that need to be handle the same as above
           //...
       end;
-      {$ELSE}
-      LTmp.Add('//todo - automatic json impl not done for delphi yet... use fpc :)');
-      {$ENDIF}
 
       //use result as buffer for the method content
       Result:=LTmp.Text;
@@ -802,22 +798,13 @@ begin
   //initialize units
   FUses:=TIntfUsesSectionImpl.Create('interface_uses');
   FUses.IndentLevel:=1;
-  {$IFDEF FPC}
   FUses.Units.Add('fgl');
-  {$ELSE}
-  //delphi specific uses
-  FUses.Units.Add('System.Collections.Generics');//not tested or impl right now
-  {$ENDIF}
 
   //initialize impl units
   FImplUses:=TImplUsesSectionImpl.Create('implementation_uses');
   FImplUses.IndentLevel:=1;
-  {$IFDEF FPC}
   FImplUses.Units.Add('fpjson');
   FImplUses.Units.Add('jsonparser');
-  {$ELSE}
-  //delphi specific impl units
-  {$ENDIF}
 
   //initialize type
   FType:=TTypeSectionImpl.Create('type');
