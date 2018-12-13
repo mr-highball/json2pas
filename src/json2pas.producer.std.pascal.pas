@@ -683,16 +683,30 @@ var
         //we will need to handle the assignment differently. additionally,
         //we may want to handle the concept of "required" or "not-required"
         //properties inside the JSON, or defaults when non-existant
-        //case...
-          //simple type we can just assign
-          //...
+        case LData[I].MetaType of
+          mtSimple:
+            begin
+              LTmp.Add(LData[I].FieldName + ':=LObj.Get(' + LData[I].ConstantName + ');');
+            end;
+          mtObject:
+            begin
+              //check existence of local var for intf, if not then add
+              //...
 
-          //object type call the FromJSON method
-          //...
-
-          //collection type has both simple and object types
-          //that need to be handle the same as above
-          //...
+              //for objects we need to create and then load from json
+              //...
+            end;
+          mtCollection:
+            begin
+              //simple type collection just call add
+              LTmp.Add(LData[I].FieldName + '.Add(LObj.Get(' + LData[I].ConstantName + '));');
+            end;
+          mtObjectCollection:
+            begin
+              //check existence of local var for intf, if not then add
+              //...
+            end;
+        end;
       end;
 
       //use result as buffer for the method content
@@ -705,12 +719,16 @@ var
     Result:=Format(
       FUNC_TEMPLATE,
       [
-        'DoFromJSON',
+        FormatObjName(AObject.Name) + '.DoFromJSON',
         'Const AJSON:String;Out Error:String',
         'Boolean;virtual',
         Indent(
-          Format(CATCH_TEMPLATE,
+          '//init result' + sLineBreak + 'Result:=False;' + sLineBreak +
+          Format(
+            CATCH_TEMPLATE,
             [
+              Indent(Result,1),
+              Indent('Error:=E.Message;',1)
             ]
           ),
           1
@@ -750,14 +768,14 @@ begin
       for I := 0 to Pred(AObjects.Count) do
       begin
         LTmp.Add(GetPropMethods(AObjects[I]));
-        LTmp.Add(GetFromJSON(AObjects[I]));
-        LTmp.Add(GetToJSON(AObjects[I]));
-        LTmp.Add(GetConstructor(AObjects[I]));
-        LTmp.Add(GetDestructor(AObjects[I]));
+        LTmp.Add(sLineBreak + GetFromJSON(AObjects[I]));
+        LTmp.Add(sLineBreak + GetToJSON(AObjects[I]));
+        LTmp.Add(sLineBreak + GetConstructor(AObjects[I]));
+        LTmp.Add(sLineBreak + GetDestructor(AObjects[I]));
 
         //success
-        //Result:=True;
-        Error:='not implemented';//deleteme
+        Result:=True;
+        //Error:='not implemented';//deleteme
       end;
 
       //update content with tmp
