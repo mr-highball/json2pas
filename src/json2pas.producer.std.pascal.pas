@@ -234,6 +234,7 @@ type
     const
       FUNC_TEMPLATE =
         'function %s(%s):%s;' + sLineBreak + //name | args | return
+        '%s' + sLineBreak + //const | type | var | nested procs
         'begin' + sLineBreak +
         '%s' + sLineBreak + // method body
         'end;';
@@ -649,112 +650,146 @@ var
   I:Integer;
   LTmp:TStringList;
 
+  (*
+    todo - could probably make these virtual protected methods so children
+    would have an easier time extended or changing desired formatting
+    or json libraries, but right now just trying things out
+  *)
+
   function GetFromJSON(Const AObject:TJ2PasObject):String;
   var
     I:Integer;
     LData:TMetadatas;
-    LTmp:TStringList;
+    LTmp,
+    LLocals:TStringList;
+    LLocal:String;
   begin
     //fetch metadata for the object
     LData:=GetMetadata(AObject);
-
-    LTmp:=TStringList.Create;
+    LLocals:=TStringList.Create;
     try
-      //handle initial json parsing
-      LTmp.Add('LData:=GetJSON(AJSON);');
-      LTmp.Add('if not Assigned(LData) or (LData.JsonType <> jtObject) then');
-      LTmp.Add(
-        Indent(
-          'raise Exception.Create(' +
-          QuotedStr('DoFromJSON::invalid JSON object in ')
-          + ' + Self.Classname);',
-          1
-        )
-      );
+      LTmp:=TStringList.Create;
+      try
+        //handle initial json parsing
+        LTmp.Add('//attempt to parse JSON object');
+        LTmp.Add('LData:=GetJSON(AJSON);');
+        LTmp.Add('if not Assigned(LData) or (LData.JsonType <> jtObject) then');
+        LTmp.Add(
+          Indent(
+            'raise Exception.Create(' +
+            QuotedStr('DoFromJSON::invalid JSON object in ')
+            + ' + Self.Classname);',
+            1
+          )
+        );
 
-      //cast to object
-      LTmp.Add(sLineBreak + '//cast TJSONData -> TJSONObject');
-      LTmp.Add('LObj:=TJSONObject(LData);');
+        //cast to object
+        LTmp.Add(sLineBreak + '//cast TJSONData -> TJSONObject');
+        LTmp.Add('LObj:=TJSONObject(LData);');
 
-      //iterate our metadata to fill out method content
-      for I := 0 to High(LData) do
-      begin
-        //depending on the type of the property (basic/object/collection)
-        //we will need to handle the assignment differently. additionally,
-        //we may want to handle the concept of "required" or "not-required"
-        //properties inside the JSON, or defaults when non-existant
-        case LData[I].MetaType of
-          mtSimple:
-            begin
-              LTmp.Add(LData[I].FieldName + ':=LObj.Get(' + LData[I].ConstantName + ');');
-            end;
-          mtObject:
-            begin
-              //check existence of local var for intf, if not then add
-              //...
+        //iterate our metadata to fill out method content
+        for I := 0 to High(LData) do
+        begin
+          //depending on the type of the property (basic/object/collection)
+          //we will need to handle the assignment differently. additionally,
+          //we may want to handle the concept of "required" or "not-required"
+          //properties inside the JSON, or defaults when non-existant
+          case LData[I].MetaType of
+            mtSimple:
+              begin
+                LTmp.Add(LData[I].FieldName + ':=LObj.Get(' + LData[I].ConstantName + ');');
+              end;
+            mtObject:
+              begin
+                //for objects we need to load from json
+                LTmp.Add(LData[I].FieldName + '.FromJSON(' + 'LObj.Get(' + LData[I].ConstantName + ',''{}''));');
+              end;
+            mtCollection:
+              begin
+                //simple type collection just call add for as manybjects in array
+                if LLocals.IndexOf('LArray') < 0 then
+                  LLocals.Add('LArray : TJSONArray;');
 
-              //for objects we need to create and then load from json
-              //...
-            end;
-          mtCollection:
-            begin
-              //simple type collection just call add
-              LTmp.Add(LData[I].FieldName + '.Add(LObj.Get(' + LData[I].ConstantName + '));');
-            end;
-          mtObjectCollection:
-            begin
-              //check existence of local var for intf, if not then add
-              //...
-            end;
+                //will need a counter var
+                if LLocals.IndexOf('I') < 0 then
+                  LLocals.Add('I : Integer;');
+
+                LTmp.Add('');
+                LTmp.Add('//assign our array to local variable');
+                LTmp.Add('LArray:=LObj.Arrays[' +LData[I].ConstantName + '];');
+                LTmp.Add('');
+                LTmp.Add('//iterate and add to collection');
+                LTmp.Add('for I:=0 to Pred(LArray.Count) do');
+                LTmp.Add(Indent(LData[I].FieldName + '.Add(LObj.Get(' + LData[I].ConstantName + '));',1));
+              end;
+            mtObjectCollection:
+              begin
+                LLocal:='L' + LData[I].FieldType.Substring(2);
+
+                //check existence of local var for intf, if not then add
+                if LLocals.IndexOf(LLocal) < 0 then
+                  LLocals.Add(LLocal + ' : ' + LData[I].FieldType);
+              end;
+          end;
         end;
+
+        //use result as buffer for the method content
+        Result:=LTmp.Text;
+      finally
+        LTmp.Free;
       end;
 
-      //use result as buffer for the method content
-      Result:=LTmp.Text;
+      //format the result
+      Result:=Format(
+        FUNC_TEMPLATE,
+        [
+          FormatObjName(AObject.Name) + '.DoFromJSON',
+          'Const AJSON:String;Out Error:String',
+          'Boolean;virtual',
+          'var' + sLineBreak + Indent(LLocals.Text,1),
+          Indent(
+            '//init result' + sLineBreak + 'Result:=False;' + sLineBreak +
+            Format(
+              CATCH_TEMPLATE,
+              [
+                Indent(Result,1) +
+                Indent(sLineBreak + '//success' + sLineBreak + 'Result:=True;',1),
+                Indent('Error:=E.Message;',1)
+              ]
+            )
+            ,
+            1
+          )
+        ]
+      );
     finally
-      LTmp.Free;
+      LLocals.Free;
     end;
 
-    //todo - use consts to lookup in json and set to priv field
-    Result:=Format(
-      FUNC_TEMPLATE,
-      [
-        FormatObjName(AObject.Name) + '.DoFromJSON',
-        'Const AJSON:String;Out Error:String',
-        'Boolean;virtual',
-        Indent(
-          '//init result' + sLineBreak + 'Result:=False;' + sLineBreak +
-          Format(
-            CATCH_TEMPLATE,
-            [
-              Indent(Result,1),
-              Indent('Error:=E.Message;',1)
-            ]
-          ),
-          1
-        )
-      ]
-    );
   end;
 
   function GetToJSON(Const AObject:TJ2PasObject):String;
   begin
     //todo - use const and value of priv to construct a json object
+    Result:='';
   end;
 
   function GetPropMethods(Const AObject:TJ2PasObject):String;
   begin
     //todo - hack together something
+    Result:='';
   end;
 
   function GetConstructor(Const AObject:TJ2PasObject):String;
   begin
     //todo - defaults for private vars/objects
+    Result:='';
   end;
 
   function GetDestructor(Const AObject:TJ2PasObject):String;
   begin
     //todo - nil out interfaces and free objects
+    Result:='';
   end;
 
 begin
