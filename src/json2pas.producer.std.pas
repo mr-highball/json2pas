@@ -221,6 +221,7 @@ begin
   //create a temp string list to iterate over and indent
   LTmp:=TStringList.Create;
   try
+    LTmp.SkipLastLineBreak:=True;
     LTmp.Text:=AInput;
     for I := 0 to Pred(LTmp.Count) do
     begin
@@ -298,7 +299,7 @@ begin
     //for each writer, append to source
     for I := 0 to Pred(FWriters.Count) do
       if FWriters[I].Write(AObjects,LContent,Error) then
-        Source:=Source + LContent
+        Source:=Source + LContent + sLineBreak
       else
         Exit;
 

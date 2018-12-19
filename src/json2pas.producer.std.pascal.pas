@@ -614,12 +614,15 @@ begin
         if TJ2PasArrayProp(LProp).ArrayType in [jtBool,jtInt,jtFloat,jtString] then
         begin
           Result[I].CollectionName:=GetCollectionName(LProp.Name);
+          Result[I].FieldType:=BasicJTypeToType(LProp.JType);
           Result[I].MetaType:=mtCollection;
         end
         //collection of object
         else
         begin
-          Result[I].CollectionName:=GetCollectionName(FormatIntfName(TJ2PasArrayObject(LProp).ObjectName));
+          //in this case the fieldtype needs to be the type of object in the collection
+          Result[I].CollectionName:=LProps.ValueFromIndex[I];
+          Result[I].FieldType:=FormatIntfName(TJ2PasArrayObject(LProp).ObjectName);
           Result[I].MetaType:=mtObjectCollection;
         end;
       end;
@@ -670,6 +673,10 @@ var
     try
       LTmp:=TStringList.Create;
       try
+        //add local json handling vars
+        LLocals.Add('LData : TJSONData;');
+        LLocals.Add('LObj : TJSONObject;');
+
         //handle initial json parsing
         LTmp.Add('//attempt to parse JSON object');
         LTmp.Add('LData:=GetJSON(AJSON);');
@@ -707,28 +714,52 @@ var
             mtCollection:
               begin
                 //simple type collection just call add for as manybjects in array
-                if LLocals.IndexOf('LArray') < 0 then
+                if LLocals.Text.IndexOf('LArray') < 0 then
                   LLocals.Add('LArray : TJSONArray;');
 
                 //will need a counter var
-                if LLocals.IndexOf('I') < 0 then
+                if LLocals.Text.IndexOf('I : Integer') < 0 then
                   LLocals.Add('I : Integer;');
 
                 LTmp.Add('');
                 LTmp.Add('//assign our array to local variable');
                 LTmp.Add('LArray:=LObj.Arrays[' +LData[I].ConstantName + '];');
                 LTmp.Add('');
-                LTmp.Add('//iterate and add to collection');
+                LTmp.Add('//iterate and add basic type to collection');
                 LTmp.Add('for I:=0 to Pred(LArray.Count) do');
-                LTmp.Add(Indent(LData[I].FieldName + '.Add(LObj.Get(' + LData[I].ConstantName + '));',1));
+                LTmp.Add(Indent(LData[I].FieldName + '.Add(LArray.Items[I].Value);',1));
               end;
             mtObjectCollection:
               begin
-                LLocal:='L' + LData[I].FieldType.Substring(2);
+                //substring is 0 index based
+                LLocal:='L' + LData[I].FieldType.Substring(1);
 
                 //check existence of local var for intf, if not then add
                 if LLocals.IndexOf(LLocal) < 0 then
                   LLocals.Add(LLocal + ' : ' + LData[I].FieldType);
+
+                //build out code to assign to a local variable, and add to the
+                //private object collection
+                LTmp.Add('');
+                LTmp.Add('//assign our array to local variable');
+                LTmp.Add('LArray:=LObj.Arrays[' +LData[I].ConstantName + '];');
+                LTmp.Add('');
+                LTmp.Add('//iterate and add object type to collection');
+                LTmp.Add('for I:=0 to Pred(LArray.Count) do');
+                LTmp.Add('begin');
+                LTmp.Add(Indent('//first get a local reference',1));
+                LTmp.Add(Indent(LLocal + ':=' + FormatObjName('T' + LData[I].FieldType.SubString(1)) + '.Create;',1));
+                LTmp.Add('');
+                LTmp.Add(Indent('//attempt to deserialize with json at index',1));
+                LTmp.Add(Indent('if not ' + LData[I].FieldName + '.FromJSON(LArray.Items[I].Value,Error)) then',1));
+                LTmp.Add(Indent('Exit;',2));
+                LTmp.Add('');
+                LTmp.Add(Indent('//add to collection',1));
+                LTmp.Add(Indent(LData[I].FieldName + '.Add(' + LLocal + ');',1));
+                LTmp.Add('');
+                LTmp.Add(Indent('//nil local reference before iterating again',1));
+                LTmp.Add(Indent(LLocal + ':=nil;',1));
+                LTmp.Add('end;');
               end;
           end;
         end;
@@ -769,9 +800,129 @@ var
   end;
 
   function GetToJSON(Const AObject:TJ2PasObject):String;
+  var
+    LData:TMetaDatas;
+    I:Integer;
+    LLocals,
+    LTmp:TStringList;
   begin
-    //todo - use const and value of priv to construct a json object
     Result:='';
+    LData:=GetMetadata(AObject);
+    LLocals:=TStringList.Create;
+    try
+      //will use local json object to build result
+      LLocals.Add('LObj : TJSONObject;');
+
+      LTmp:=TStringList.Create;
+      try
+        //iterate metadata and build method body
+        for I := 0 to High(LData) do
+        begin
+          case LData[I].MetaType of
+            mtSimple:
+              begin
+                //simple types lowest level Add should be fine
+                LTmp.Add('LObj.Add(' + LData[I].ConstantName + ','
+                  + LData[I].FieldName + ');'
+                );
+              end;
+            mtObject:
+              begin
+                //object types create an object and add
+                LTmp.Add('LObj.Add(' + LData[I].ConstantName + ','
+                  + 'GetJSON(' + LData[I].FieldName + '.ToJSON));'
+                );
+              end;
+            mtCollection:
+              begin
+                //collection types we need to use local array
+                if LLocals.Text.IndexOf('LArray : TJSONArray;') < 0 then
+                  LLocals.Add('LArray : TJSONArray;');
+
+                if LLocals.Text.IndexOf('I : Integer;') < 0 then
+                  LLocals.Add('I : Integer;');
+
+                //add to array in loop
+                LTmp.Add('');
+                LTmp.Add('//assign new array to local var');
+                LTmp.Add('LArray:=TJSONArray.Create');
+                LTmp.Add('for I:=0 to Pred(' + LData[I].FieldName + '.Count) do');
+                LTmp.Add('begin');
+                LTmp.Add(Indent('//add basic type for private var to local array',1));
+                LTmp.Add(Indent('LArray.Add(' + LData[I].FieldName + '[I]);',1));
+                LTmp.Add('end;');
+                LTmp.Add('');
+                LTmp.Add('//add the array to result object (will free)');
+                LTmp.Add('LObj.Add(' + LData[I].ConstantName + ',LArray)');
+              end;
+            mtObjectCollection:
+              begin
+                //collection types we need to use local array
+                if LLocals.Text.IndexOf('LArray : TJSONArray;') < 0 then
+                  LLocals.Add('LArray : TJSONArray;');
+
+                if LLocals.Text.IndexOf('I : Integer;') < 0 then
+                  LLocals.Add('I : Integer;');
+
+                //add to array in loop
+                LTmp.Add('');
+                LTmp.Add('//assign new array to local var');
+                LTmp.Add('LArray:=TJSONArray.Create');
+                LTmp.Add('for I:=0 to Pred(' + LData[I].FieldName + '.Count) do');
+                LTmp.Add('begin');
+                LTmp.Add(Indent('//add object type for private var to local array',1));
+                LTmp.Add(Indent('LArray.Add(GetJSON(' + LData[I].FieldName + '[I].ToJSON));',1));
+                LTmp.Add('end;');
+                LTmp.Add('');
+                LTmp.Add('//add the array to result object (will free)');
+                LTmp.Add('LObj.Add(' + LData[I].ConstantName + ',LArray)');
+              end;
+          end;
+        end;
+
+        //result as buffer for method body
+        Result:='LObj:=TJSONObject.Create;' + sLineBreak +
+          Format(
+            TRY_TEMPLATE,
+            [
+              Indent(
+                LTmp.Text + sLineBreak + '//set output' + sLineBreak +
+                  'JSON:=LObj.ToJSON;',
+                1
+              ),
+              Indent('LObj.Free',1)
+            ]
+        );
+      finally
+        LTmp.Free;
+      end;
+
+      //format the result
+      Result:=Format(
+        FUNC_TEMPLATE,
+        [
+          FormatObjName(AObject.Name) + '.DoToJSON',
+          'Out JSON,Error:String',
+          'Boolean;virtual',
+          'var' + sLineBreak + Indent(LLocals.Text,1),
+          Indent(
+            '//init result' + sLineBreak + 'Result:=False;' + sLineBreak +
+            Format(
+              CATCH_TEMPLATE,
+              [
+                Indent(Result,1) +
+                Indent(sLineBreak + '//success' + sLineBreak + 'Result:=True;',1),
+                Indent('Error:=E.Message;',1)
+              ]
+            )
+            ,
+            1
+          )
+        ]
+      );
+    finally
+      LLocals.Free;
+    end;
   end;
 
   function GetPropMethods(Const AObject:TJ2PasObject):String;
