@@ -784,7 +784,7 @@ var
               CATCH_TEMPLATE,
               [
                 Indent(Result,1) +
-                Indent(sLineBreak + '//success' + sLineBreak + 'Result:=True;',1),
+                Indent(DupeString(sLineBreak,2) + '//success' + sLineBreak + 'Result:=True;',1),
                 Indent('Error:=E.Message;',1)
               ]
             )
@@ -887,7 +887,8 @@ var
             [
               Indent(
                 LTmp.Text + sLineBreak + '//set output' + sLineBreak +
-                  'JSON:=LObj.ToJSON;',
+                  'JSON:=LObj.ToJSON;' + DupeString(sLineBreak,2) +
+                  '//success' + sLineBreak + 'Result:=True;',
                 1
               ),
               Indent('LObj.Free',1)
@@ -910,8 +911,7 @@ var
             Format(
               CATCH_TEMPLATE,
               [
-                Indent(Result,1) +
-                Indent(sLineBreak + '//success' + sLineBreak + 'Result:=True;',1),
+                Indent(Result,1),
                 Indent('Error:=E.Message;',1)
               ]
             )

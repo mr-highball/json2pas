@@ -45,37 +45,6 @@ type
     procedure WriteHelp; virtual;
   end;
 
-(*
-  an example showing a name formatting method for properties
-  turning something this 'hello_world' -> 'HelloWorld'
-*)
-procedure FormatProp(Var AName:String);
-var
-  I:Integer;
-begin
-  //uppercase first letter
-  if AName.Length >= 1 then
-    AName[1]:=UpperCase(AName[1])[1];
-
-  //remove _ chars and uppercase following letter
-  while Pos('_',AName) > 0 do
-  begin
-    I:=Pos('_',AName);
-
-    //uppercase following
-    if I < AName.Length then
-      AName[Succ(I)]:=UpperCase(AName[Succ(I)])[1];
-
-    //remove the underscore
-    if (I > 1) and (I < AName.Length) then
-      AName:=Copy(AName,1,Pred(I)) + Copy(AName,Succ(I),AName.Length - I)
-    else if I = 1 then
-      AName:=Copy(AName,Succ(I),AName.Length - 1)
-    else
-      AName:=Copy(AName,1,Pred(I));
-  end;
-end;
-
 procedure TestSomeJSON;
 var
   LObj:TJ2PasObject;
@@ -201,7 +170,6 @@ end;
 var
   Application: TJSON2PasUtil;
 begin
-  DefaultPropertyNameFormat:=FormatProp;
   Application:=TJSON2PasUtil.Create(nil);
   Application.Title:='JSON2Pas';
   Application.Run;

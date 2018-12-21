@@ -160,6 +160,12 @@ type
   *)
   function ObjectByName(Const AObjects:TJ2PasObjects;Const AName:String;
     Out AObject:TJ2PasObject):Boolean;
+
+  (*
+    attempts to parse a json object and add it to the global object collection
+  *)
+  function ParseAndAddObject(Const AJSON,AObjectName:String;
+    Out JObject:TJ2PasObject;Out Error:String):Boolean;
 var
   (*
     assign a default name format and this will be used when parsing
@@ -167,9 +173,44 @@ var
   DefaultPropertyNameFormat : TPropertyNameFormat;
   DefaultObjectNameFormat : TObjectNameFormat;
 
-implementation
-var
+  (*
+    also accessible via TJ2PasObject.Objects class property
+  *)
   GlobalObjects : TJ2PasObjects;
+
+implementation
+
+(*
+  default name formatting method for properties
+  turning something this 'hello_world' -> 'HelloWorld'
+  additionally will work with camel case 'helloWorld' -> 'HelloWorld'
+*)
+procedure FormatProp(Var AName:String);
+var
+  I:Integer;
+begin
+  //uppercase first letter
+  if AName.Length >= 1 then
+    AName[1]:=UpperCase(AName[1])[1];
+
+  //remove _ chars and uppercase following letter
+  while Pos('_',AName) > 0 do
+  begin
+    I:=Pos('_',AName);
+
+    //uppercase following
+    if I < AName.Length then
+      AName[Succ(I)]:=UpperCase(AName[Succ(I)])[1];
+
+    //remove the underscore
+    if (I > 1) and (I < AName.Length) then
+      AName:=Copy(AName,1,Pred(I)) + Copy(AName,Succ(I),AName.Length - I)
+    else if I = 1 then
+      AName:=Copy(AName,Succ(I),AName.Length - 1)
+    else
+      AName:=Copy(AName,1,Pred(I));
+  end;
+end;
 
 function ObjectByName(const AObjects: TJ2PasObjects;Const AName:String;
   out AObject: TJ2PasObject): Boolean;
@@ -186,6 +227,25 @@ begin
       Exit;
     end;
   end;
+end;
+
+function ParseAndAddObject(const AJSON, AObjectName: String; out
+  JObject: TJ2PasObject; out Error: String): Boolean;
+var
+  I:Integer;
+begin
+  Result:=False;
+
+  //first attempt to parse
+  if not TJ2PasObject.Parse(AJSON,JObject,Error) then
+    Exit;
+
+  //now add the object
+  if not TJ2PasObject.ObjectExists(JObject.Properties,I,True,AObjectName) then
+    Exit;
+
+  //success
+  Result:=True;
 end;
 
 { TJ2PasArrayObject }
@@ -733,7 +793,7 @@ end;
 
 initialization
   GlobalObjects:=TJ2PasObjects.Create(True);
-  DefaultPropertyNameFormat:=nil;
+  DefaultPropertyNameFormat:=FormatProp;
   DefaultObjectNameFormat:=nil;
   RegisterClasses([TJ2PasProp,TJ2PasArrayProp,TJ2PasArrayObject]);
 finalization
